@@ -7,6 +7,7 @@ settings:
     PRODUCT_NAME: "Syncthing Tray"
     PRODUCT_MODULE_NAME: SyncthingTray
     SWIFT_VERSION: "6.0"
+    ARCHS: [arm64, x86_64]
 schemes:
   SyncthingTray:
     build:
@@ -23,6 +24,8 @@ targets:
     deploymentTarget: "14.0"
     sources:
       - path: SyncthingTray
+        excludes:
+          - "*.entitlements"
     info:
       path: SyncthingTray/Info.plist
       properties:
@@ -36,8 +39,10 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         PRODUCT_BUNDLE_IDENTIFIER: com.brandonstone.syncthingtray
         CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: SyncthingTray/SyncthingTray.entitlements
+        DEVELOPMENT_TEAM: K6N4J68LTY
         ENABLE_DEBUG_DYLIB: NO
-        ENABLE_HARDENED_RUNTIME: NO
+        ENABLE_HARDENED_RUNTIME: YES
         GENERATE_INFOPLIST_FILE: NO
   SyncthingTrayTests:
     type: bundle.unit-test

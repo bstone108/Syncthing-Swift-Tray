@@ -2,12 +2,13 @@ import AppKit
 import WebKit
 
 @MainActor
-final class EmbeddedGUIController: NSObject, NSWindowDelegate {
+final class EmbeddedGUIController {
     var onWindowOpenChanged: ((Bool) -> Void)?
 
     private(set) var isWindowOpen = false
 
     private var window: NSWindow?
+    private var windowBridge: GUIWindowBridge?
     private var webView: WKWebView?
     private var bannerContainer: NSVisualEffectView?
     private var bannerLabel: NSTextField?
@@ -15,20 +16,20 @@ final class EmbeddedGUIController: NSObject, NSWindowDelegate {
 
     func show(url: URL) {
         let window = ensureWindow()
-        webView?.load(URLRequest(url: url))
         present(window: window)
+        webView?.load(URLRequest(url: url))
     }
 
     func showLoading(title: String, message: String) {
         let window = ensureWindow()
-        webView?.loadHTMLString(htmlShell(title: title, message: message, accentHex: "#58C4E8"), baseURL: nil)
         present(window: window)
+        webView?.loadHTMLString(htmlShell(title: title, message: message, accentHex: "#58C4E8"), baseURL: nil)
     }
 
     func showError(title: String, message: String, baseURL: URL?) {
         let window = ensureWindow()
-        webView?.loadHTMLString(htmlShell(title: title, message: message, accentHex: "#FF6B6B"), baseURL: baseURL)
         present(window: window)
+        webView?.loadHTMLString(htmlShell(title: title, message: message, accentHex: "#FF6B6B"), baseURL: baseURL)
     }
 
     func setUpdateBanner(_ message: String?) {
@@ -39,7 +40,13 @@ final class EmbeddedGUIController: NSObject, NSWindowDelegate {
         bannerContainer.isHidden = message == nil
     }
 
-    func windowWillClose(_ notification: Notification) {
+    func close() {
+        webView?.stopLoading()
+        window?.orderOut(nil)
+        handleWindowWillClose()
+    }
+
+    private func handleWindowWillClose() {
         updateWindowState(isOpen: false)
     }
 
@@ -55,11 +62,22 @@ final class EmbeddedGUIController: NSObject, NSWindowDelegate {
             defer: false
         )
         window.title = "Syncthing Tray"
-        window.delegate = self
+        window.minSize = NSSize(width: 640, height: 480)
+        window.isReleasedWhenClosed = false
         window.setFrameAutosaveName("SyncthingTray.WebUI")
 
-        let contentView = NSView()
-        contentView.translatesAutoresizingMaskIntoConstraints = false
+        let bridge = GUIWindowBridge { [weak self] in
+            Task { @MainActor in
+                self?.handleWindowWillClose()
+            }
+        }
+        windowBridge = bridge
+        window.delegate = bridge
+
+        guard let contentView = window.contentView else {
+            preconditionFailure("NSWindow created without a contentView")
+        }
+        contentView.wantsLayer = true
 
         let bannerContainer = NSVisualEffectView()
         bannerContainer.translatesAutoresizingMaskIntoConstraints = false
@@ -75,12 +93,15 @@ final class EmbeddedGUIController: NSObject, NSWindowDelegate {
 
         bannerContainer.addSubview(bannerLabel)
 
-        let webView = WKWebView(frame: .zero)
+        let configuration = WKWebViewConfiguration()
+        configuration.suppressesIncrementalRendering = true
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+
+        let webView = WKWebView(frame: contentView.bounds, configuration: configuration)
         webView.translatesAutoresizingMaskIntoConstraints = false
 
         contentView.addSubview(bannerContainer)
         contentView.addSubview(webView)
-        window.contentView = contentView
 
         NSLayoutConstraint.activate([
             bannerContainer.topAnchor.constraint(equalTo: contentView.topAnchor),
@@ -109,6 +130,8 @@ final class EmbeddedGUIController: NSObject, NSWindowDelegate {
 
     private func present(window: NSWindow) {
         window.makeKeyAndOrderFront(nil)
+        window.contentView?.layoutSubtreeIfNeeded()
+        window.layoutIfNeeded()
         NSApp.activate(ignoringOtherApps: true)
         updateWindowState(isOpen: true)
     }
@@ -193,5 +216,20 @@ final class EmbeddedGUIController: NSObject, NSWindowDelegate {
         guard isWindowOpen != isOpen else { return }
         isWindowOpen = isOpen
         onWindowOpenChanged?(isOpen)
+    }
+}
+
+/// AppKit window callbacks are objc_msgSend, not Swift MainActor hops.
+/// Keep the delegate off `@MainActor` so WebKit layer commits do not enter
+/// `_checkExpectedExecutor` / `swift_task_isMainExecutorImpl`.
+private final class GUIWindowBridge: NSObject, NSWindowDelegate {
+    private let onWillClose: @Sendable () -> Void
+
+    init(onWillClose: @escaping @Sendable () -> Void) {
+        self.onWillClose = onWillClose
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        onWillClose()
     }
 }

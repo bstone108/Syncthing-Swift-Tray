@@ -11,7 +11,7 @@ final class StatusItemController: NSObject {
     private let popover = NSPopover()
 
     private var cancellables: Set<AnyCancellable> = []
-    private var animationTimer: Timer?
+    private var animationTask: Task<Void, Never>?
     private var spinFrameIndex = 0
     private var spinningFrames: [NSImage] = []
 
@@ -32,7 +32,7 @@ final class StatusItemController: NSObject {
         if let button = statusItem.button {
             DebugLog.write("status item button exists")
             button.target = self
-            button.action = #selector(togglePopover(_:))
+            button.action = #selector(handleStatusItemClick(_:))
             button.imagePosition = .imageOnly
             button.imageScaling = .scaleProportionallyDown
             button.toolTip = "Syncthing Tray"
@@ -47,8 +47,9 @@ final class StatusItemController: NSObject {
 
         appModel.$statusSnapshot
             .sink { [weak self] snapshot in
-                DebugLog.write("status snapshot changed mode=\(snapshot.mode)")
-                self?.updateIcon(for: snapshot)
+                Task { @MainActor in
+                    self?.updateIcon(for: snapshot)
+                }
             }
             .store(in: &cancellables)
 
@@ -56,11 +57,35 @@ final class StatusItemController: NSObject {
         DebugLog.write("StatusItemController.install end")
     }
 
+    func closePopover() {
+        if popover.isShown {
+            popover.performClose(nil)
+        }
+    }
+
+    func invalidate() {
+        stopSpinAnimation()
+        cancellables.removeAll()
+        closePopover()
+        statusItem.button?.target = nil
+        statusItem.button?.action = nil
+        NSStatusBar.system.removeStatusItem(statusItem)
+    }
+
+    // NSStatusItem delivers this via objc_msgSend, not the Swift MainActor
+    // executor. Hop before touching isolated state; a MainActor-isolated
+    // @objc thunk is what SIGSEGV'd in _checkExpectedExecutor.
     @objc
-    private func togglePopover(_ sender: AnyObject?) {
+    nonisolated private func handleStatusItemClick(_ sender: AnyObject?) {
+        Task { @MainActor in
+            self.togglePopover()
+        }
+    }
+
+    private func togglePopover() {
         guard let button = statusItem.button else { return }
         if popover.isShown {
-            popover.performClose(sender)
+            popover.performClose(nil)
         } else {
             var anchorRect = button.bounds
             anchorRect.origin.y -= Self.popoverVerticalOffset
@@ -90,21 +115,23 @@ final class StatusItemController: NSObject {
             }
         }
 
-        if animationTimer != nil {
-            return
-        }
+        guard animationTask == nil else { return }
 
-        animationTimer = Timer.scheduledTimer(timeInterval: 0.12, target: self, selector: #selector(advanceSpinFrame), userInfo: nil, repeats: true)
-        animationTimer?.tolerance = 0.03
+        animationTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                self.advanceSpinFrame()
+                try? await Task.sleep(for: .milliseconds(120))
+            }
+        }
     }
 
     private func stopSpinAnimation() {
-        animationTimer?.invalidate()
-        animationTimer = nil
+        animationTask?.cancel()
+        animationTask = nil
         spinFrameIndex = 0
     }
 
-    @objc
     private func advanceSpinFrame() {
         guard spinningFrames.isEmpty == false else { return }
         statusItem.button?.image = spinningFrames[spinFrameIndex]

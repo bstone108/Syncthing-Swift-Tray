@@ -1,13 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Build a universal Release "Syncthing Tray.app" (xcodegen + xcodebuild), then
+# Build a Release "Syncthing Tray.app" (xcodegen + xcodebuild), then
 # Developer ID-sign inside-out, notarize, and staple both the .app and a .dmg.
+#
+# Architectures (Brandon's policy: dedicated slices are required; a universal
+# binary is welcome in addition, not instead):
+#   SYNCTHINGTRAY_ARCH=arm64      macos-15, ARCHS=arm64 ONLY_ACTIVE_ARCH=YES
+#   SYNCTHINGTRAY_ARCH=x86_64     macos-15-intel, ARCHS=x86_64 ONLY_ACTIVE_ARCH=YES
+#   SYNCTHINGTRAY_ARCH=universal  macos-15, ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO
+# Dedicated jobs must run on a matching host (uname -m) and fail if the other
+# slice is present. Universal fails if either slice is missing.
+#
+# Flags:
+#   --compile-only  unsigned Release compile + arch check. Used by pull-request
+#                   CI. Does not import a cert, call notarytool, staple, consume
+#                   a date.build N, or emit zip/dmg.
+#   --print-version resolve the artifact version label and exit.
 #
 # Required for a signed release:
 #   MACOS_CODESIGN_IDENTITY  (never "-" / ad-hoc)
 #
-# Required for notarization (always on GitHub Actions):
+# Required for notarization (signed releases only; never on --compile-only):
 #   APPLE_ID
 #   APPLE_APP_SPECIFIC_PASSWORD
 #   APPLE_TEAM_ID
@@ -16,15 +30,24 @@ set -euo pipefail
 #   SYNCTHINGTRAY_RELEASE=1  assign YYYY.M.D.N (America/Chicago) for a real
 #                           GitHub release. N is max(existing tag/release)+1.
 #   SYNCTHINGTRAY_VERSION    when releasing from an already-pushed vYYYY.M.D.N
-#                           tag, use that version instead of incrementing.
+#                           tag, or from the gate job's shared assignment, use
+#                           that version instead of incrementing.
 #   Pull-request / verification runs must leave SYNCTHINGTRAY_RELEASE unset.
 #   They keep the committed Info.plist template inside the bundle and name
 #   artifacts with a non-release label (default: ci).
+#
+# Zip / notary (Apple cannot staple a zip):
+#   ditto -c -k --keepParent the .app into a temp zip, notarytool submit that
+#   zip, stapler staple the .app, THEN ship that stapled .app as the named
+#   release zip. Codesign, notarize, and staple the .dmg as well. The notary
+#   zip is disposable and is never a release asset. Do not submit the named
+#   release zip as a second notary item.
 #
 # Optional:
 #   MACOS_REQUIRE_NOTARIZATION=1  force notarization even outside Actions
 #   MACOS_NOTARY_TIMEOUT          notarytool --timeout (default 45m)
 #   SYNCTHINGTRAY_CI_VERSION_LABEL artifact label for non-release runs (ci)
+#   SYNCTHINGTRAY_ARCH            arm64, x86_64, or universal (default: universal)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -36,8 +59,7 @@ APP_BUNDLE_NAME="Syncthing Tray"
 ARTIFACT_NAME="SyncthingTray"
 SCHEME_NAME="SyncthingTray"
 CI_VERSION_LABEL="${SYNCTHINGTRAY_CI_VERSION_LABEL:-ci}"
-REQUIRED_ARCHS=(arm64 x86_64)
-ARCH_LABEL="universal"
+COMPILE_ONLY=0
 
 is_release_packaging() {
   [[ "${SYNCTHINGTRAY_RELEASE:-0}" == "1" ]]
@@ -50,6 +72,10 @@ looks_like_date_build() {
 resolve_packaging_version() {
   if is_release_packaging; then
     local version
+    if [[ -n "${GITHUB_ACTIONS:-}" && -z "${SYNCTHINGTRAY_VERSION:-}" ]]; then
+      echo "GitHub Actions releases must pass SYNCTHINGTRAY_VERSION from the gate job so every arch stamps the same date.build." >&2
+      exit 1
+    fi
     if [[ -n "${SYNCTHINGTRAY_VERSION:-}" ]]; then
       version="$(python3 "${VERSION_HELPER}" --from-tag "${SYNCTHINGTRAY_VERSION}")"
     else
@@ -80,9 +106,47 @@ if [[ "${1:-}" == "--print-version" ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == "--compile-only" ]]; then
+  COMPILE_ONLY=1
+fi
+
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "This packaging script must be run on macOS (except --print-version)." >&2
   exit 1
+fi
+
+ARCH_LABEL="${SYNCTHINGTRAY_ARCH:-universal}"
+case "${ARCH_LABEL}" in
+  arm64)
+    XCODE_ARCHS="arm64"
+    ONLY_ACTIVE_ARCH="YES"
+    REQUIRED_ARCHS=(arm64)
+    FORBIDDEN_ARCHS=(x86_64)
+    ;;
+  x86_64)
+    XCODE_ARCHS="x86_64"
+    ONLY_ACTIVE_ARCH="YES"
+    REQUIRED_ARCHS=(x86_64)
+    FORBIDDEN_ARCHS=(arm64)
+    ;;
+  universal)
+    XCODE_ARCHS="arm64 x86_64"
+    ONLY_ACTIVE_ARCH="NO"
+    REQUIRED_ARCHS=(arm64 x86_64)
+    FORBIDDEN_ARCHS=()
+    ;;
+  *)
+    echo "Unsupported SYNCTHINGTRAY_ARCH=${ARCH_LABEL} (expected arm64, x86_64, or universal)." >&2
+    exit 1
+    ;;
+esac
+
+if [[ "${ARCH_LABEL}" != "universal" ]]; then
+  host="$(uname -m)"
+  if [[ "${host}" != "${ARCH_LABEL}" ]]; then
+    echo "Dedicated ${ARCH_LABEL} build must run on a ${ARCH_LABEL} GitHub-hosted runner (host is ${host})." >&2
+    exit 1
+  fi
 fi
 
 CODESIGN_IDENTITY="${MACOS_CODESIGN_IDENTITY:-}"
@@ -112,39 +176,51 @@ if [[ ! -f "${VERSION_HELPER}" ]]; then
   exit 1
 fi
 
-resolve_packaging_version
+if [[ "${COMPILE_ONLY}" -eq 1 ]] && is_release_packaging; then
+  echo "Refusing --compile-only together with SYNCTHINGTRAY_RELEASE=1 (that would consume a date.build)." >&2
+  exit 1
+fi
+
+if [[ "${COMPILE_ONLY}" -eq 0 ]]; then
+  resolve_packaging_version
+fi
 
 using_developer_id() {
   [[ -n "${CODESIGN_IDENTITY}" && "${CODESIGN_IDENTITY}" != "-" ]]
 }
 
 notarization_requested() {
+  if [[ "${COMPILE_ONLY}" -eq 1 ]]; then
+    return 1
+  fi
   if [[ "${MACOS_REQUIRE_NOTARIZATION:-0}" == "1" || -n "${GITHUB_ACTIONS:-}" ]]; then
     return 0
   fi
   [[ -n "${APPLE_ID:-}" && -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" && -n "${APPLE_TEAM_ID:-}" ]]
 }
 
-if ! using_developer_id; then
-  echo "MACOS_CODESIGN_IDENTITY must be a Developer ID identity; ad-hoc codesign --sign - is not allowed for release artifacts." >&2
-  exit 1
-fi
+if [[ "${COMPILE_ONLY}" -eq 0 ]]; then
+  if ! using_developer_id; then
+    echo "MACOS_CODESIGN_IDENTITY must be a Developer ID identity; ad-hoc codesign --sign - is not allowed for release artifacts." >&2
+    exit 1
+  fi
 
-if [[ ! -f "${ENTITLEMENTS_FILE}" ]]; then
-  echo "Entitlements file not found: ${ENTITLEMENTS_FILE}" >&2
-  exit 1
-fi
+  if [[ ! -f "${ENTITLEMENTS_FILE}" ]]; then
+    echo "Entitlements file not found: ${ENTITLEMENTS_FILE}" >&2
+    exit 1
+  fi
 
-if notarization_requested; then
-  : "${APPLE_ID:?APPLE_ID is required for notarization}"
-  : "${APPLE_APP_SPECIFIC_PASSWORD:?APPLE_APP_SPECIFIC_PASSWORD is required for notarization}"
-  : "${APPLE_TEAM_ID:?APPLE_TEAM_ID is required for notarization}"
-fi
+  if notarization_requested; then
+    : "${APPLE_ID:?APPLE_ID is required for notarization}"
+    : "${APPLE_APP_SPECIFIC_PASSWORD:?APPLE_APP_SPECIFIC_PASSWORD is required for notarization}"
+    : "${APPLE_TEAM_ID:?APPLE_TEAM_ID is required for notarization}"
+  fi
 
-if ! security find-identity -v -p codesigning | grep -F "${CODESIGN_IDENTITY}" >/dev/null; then
-  echo "Signing identity not found in keychain: ${CODESIGN_IDENTITY}" >&2
-  security find-identity -v -p codesigning >&2 || true
-  exit 1
+  if ! security find-identity -v -p codesigning | grep -F "${CODESIGN_IDENTITY}" >/dev/null; then
+    echo "Signing identity not found in keychain: ${CODESIGN_IDENTITY}" >&2
+    security find-identity -v -p codesigning >&2 || true
+    exit 1
+  fi
 fi
 
 rm_rf() {
@@ -220,7 +296,7 @@ sign_item() {
   codesign "${args[@]}" "${item}"
 }
 
-verify_universal_executable() {
+verify_expected_architectures() {
   local executable="$1"
   if [[ ! -f "${executable}" ]]; then
     echo "Executable not found: ${executable}" >&2
@@ -232,10 +308,19 @@ verify_universal_executable() {
   local required
   for required in "${REQUIRED_ARCHS[@]}"; do
     if ! grep -qw "${required}" <<<"${archs}"; then
-      echo "Expected a universal binary containing ${required}; lipo reported: ${archs}" >&2
+      echo "Expected ${ARCH_LABEL} binary containing ${required}; lipo reported: ${archs}" >&2
       exit 1
     fi
   done
+  local forbidden
+  if [[ "${#FORBIDDEN_ARCHS[@]}" -gt 0 ]]; then
+    for forbidden in "${FORBIDDEN_ARCHS[@]}"; do
+      if grep -qw "${forbidden}" <<<"${archs}"; then
+        echo "Dedicated ${ARCH_LABEL} build must not contain ${forbidden}; lipo reported: ${archs}" >&2
+        exit 1
+      fi
+    done
+  fi
 }
 
 sign_app_bundle() {
@@ -425,8 +510,8 @@ xcodebuild \
   -destination "generic/platform=macOS" \
   -derivedDataPath "${DERIVED_DATA_PATH}" \
   "CONFIGURATION_BUILD_DIR=${STAGING_BUILD_DIR}" \
-  ARCHS="arm64 x86_64" \
-  ONLY_ACTIVE_ARCH=NO \
+  ARCHS="${XCODE_ARCHS}" \
+  ONLY_ACTIVE_ARCH="${ONLY_ACTIVE_ARCH}" \
   EXCLUDED_ARCHS= \
   CODE_SIGNING_ALLOWED=NO \
   CODE_SIGNING_REQUIRED=NO \
@@ -449,7 +534,14 @@ if [[ ! -f "${STAGED_APP}/Contents/MacOS/${APP_BUNDLE_NAME}" ]]; then
   exit 1
 fi
 
-verify_universal_executable "${STAGED_APP}/Contents/MacOS/${APP_BUNDLE_NAME}"
+verify_expected_architectures "${STAGED_APP}/Contents/MacOS/${APP_BUNDLE_NAME}"
+
+if [[ "${COMPILE_ONLY}" -eq 1 ]]; then
+  echo "Compile-only: unsigned ${ARCH_LABEL} app staged at ${STAGED_APP}"
+  echo "ARCHS=${XCODE_ARCHS} ONLY_ACTIVE_ARCH=${ONLY_ACTIVE_ARCH} CODE_SIGNING_ALLOWED=NO"
+  echo "Skipping Developer ID import, notarytool, stapler, zip, dmg, and date.build assignment."
+  exit 0
+fi
 
 # Stamp before codesign so the sealed Info.plist matches the artifact/tag.
 # Never rewrite SyncthingTray/Info.plist in git.
@@ -462,6 +554,9 @@ DMG_PATH="${DELIVERABLE_DIR}/${ARTIFACT_NAME}-${APP_VERSION}-macos-${ARCH_LABEL}
 NOTARY_ZIP_PATH="${WORK_DIR}/${ARTIFACT_NAME}-notarize.zip"
 
 if notarization_requested; then
+  # Apple cannot staple a zip. Submit a zip of the Developer ID-signed .app,
+  # stapler staple that .app, then ship a new zip of the stapled .app. The
+  # notary zip is deleted and is not a release asset.
   zip_app_bundle "${STAGED_APP}" "${NOTARY_ZIP_PATH}"
   submit_for_notarization "${NOTARY_ZIP_PATH}" "app"
   rm -f "${NOTARY_ZIP_PATH}"
@@ -485,7 +580,7 @@ ditto "${STAGED_APP}" "${DELIVERABLE_DIR}/${APP_BUNDLE_NAME}.app"
   shasum -a 256 \
     "$(basename "${ARCHIVE_PATH}")" \
     "$(basename "${DMG_PATH}")"
-} > "${DELIVERABLE_DIR}/SHA256SUMS"
+} > "${DELIVERABLE_DIR}/SHA256SUMS-macos-${ARCH_LABEL}"
 
 echo "Created ${ARCHIVE_PATH}"
 echo "Created ${DMG_PATH}"

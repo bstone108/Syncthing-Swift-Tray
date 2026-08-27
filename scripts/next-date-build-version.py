@@ -166,6 +166,8 @@ def self_test() -> None:
     samples = [
         "v2026.8.24.1",
         "SyncthingTray-2026.8.24.2-macos-universal",
+        "SyncthingTray-2026.8.24.2-macos-arm64",
+        "SyncthingTray-2026.8.24.2-macos-x86_64",
         "Syncthing Tray 2026.8.24.4",
         "SyncthingTray-1.0.1-macos-universal",
         "SyncthingTray-ci-macos-universal",

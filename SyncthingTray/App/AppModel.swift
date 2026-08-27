@@ -121,6 +121,9 @@ final class AppModel: ObservableObject {
         updateCoordinator.stop()
         networkMonitor.stop()
         launchAgentController.stopSynchronously()
+        embeddedGUIController.close()
+        statusItemController?.invalidate()
+        statusItemController = nil
     }
 
     func requestStart() {
@@ -151,6 +154,7 @@ final class AppModel: ObservableObject {
     }
 
     func requestOpenGUI() {
+        statusItemController?.closePopover()
         Task { [weak self] in
             await self?.openGUI()
         }

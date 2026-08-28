@@ -1,20 +1,28 @@
 import AppKit
+import Combine
 import Foundation
 @preconcurrency import Sparkle
+
+private enum AppUpdateDefaultsKey {
+    static let postponedVersion = "appUpdate.postponedVersion"
+}
 
 /// Sparkle 2 updater for the tray wrapper itself.
 ///
 /// Syncthing *daemon* binary updates stay in `UpdateCoordinator` and are not
 /// handled here.
-final class AppUpdateController: NSObject, SPUUpdaterDelegate, SPUStandardUserDriverDelegate {
-    private enum DefaultsKey {
-        static let postponedVersion = "appUpdate.postponedVersion"
-    }
-
+///
+/// Two delegates on purpose: `SPUUpdaterDelegate` is main-actor isolated in
+/// Sparkle (`NS_SWIFT_UI_ACTOR`), while `SPUStandardUserDriverDelegate` is
+/// nonisolated. Conforming to both from one class infers a single isolation and
+/// breaks one of the two conformances under Swift 6.
+@MainActor
+final class AppUpdateController: NSObject, SPUUpdaterDelegate {
     private let logHandler: (AttentionLogLevel, String) -> Void
     private let defaults: UserDefaults
+    private let userDriverDelegate: AppUpdateUserDriverDelegate
     private var updaterController: SPUStandardUpdaterController?
-    private var canCheckObservation: NSKeyValueObservation?
+    private var canCheckObservation: AnyCancellable?
 
     var onCanCheckForUpdatesChange: ((Bool) -> Void)?
 
@@ -24,6 +32,7 @@ final class AppUpdateController: NSObject, SPUUpdaterDelegate, SPUStandardUserDr
     ) {
         self.logHandler = logHandler
         self.defaults = defaults
+        self.userDriverDelegate = AppUpdateUserDriverDelegate(defaults: defaults)
         super.init()
     }
 
@@ -31,16 +40,19 @@ final class AppUpdateController: NSObject, SPUUpdaterDelegate, SPUStandardUserDr
         let controller = SPUStandardUpdaterController(
             startingUpdater: false,
             updaterDelegate: self,
-            userDriverDelegate: self
+            userDriverDelegate: userDriverDelegate
         )
         updaterController = controller
 
-        canCheckObservation = controller.updater.observe(\.canCheckForUpdates, options: [.initial, .new]) { [weak self] updater, _ in
-            let canCheck = updater.canCheckForUpdates
-            DispatchQueue.main.async {
-                self?.onCanCheckForUpdatesChange?(canCheck)
+        // Bridge Sparkle's KVO property without reading the main-actor isolated
+        // `canCheckForUpdates` getter from a Sendable observation closure.
+        canCheckObservation = controller.updater.publisher(for: \.canCheckForUpdates)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] canCheck in
+                MainActor.assumeIsolated {
+                    self?.onCanCheckForUpdatesChange?(canCheck)
+                }
             }
-        }
 
         do {
             try controller.updater.start()
@@ -79,10 +91,10 @@ final class AppUpdateController: NSObject, SPUUpdaterDelegate, SPUStandardUserDr
 
         guard matching.isEmpty == false else {
             // Do not fall back to a universal extra (or any other slice).
-            return SUAppcastItem.emptyAppcastItem()
+            return SUAppcastItem.empty()
         }
 
-        let comparator = SUStandardVersionComparator.defaultComparator
+        let comparator = SUStandardVersionComparator.default
         var best = matching[0]
         for candidate in matching.dropFirst() {
             if comparator.compareVersion(best.versionString, toVersion: candidate.versionString) == .orderedAscending {
@@ -93,7 +105,7 @@ final class AppUpdateController: NSObject, SPUUpdaterDelegate, SPUStandardUserDr
     }
 
     func updater(_ updater: SPUUpdater, willInstallUpdateOnQuit item: SUAppcastItem, immediateInstallationBlock immediateInstallHandler: @escaping () -> Void) -> Bool {
-        defaults.set(item.versionString, forKey: DefaultsKey.postponedVersion)
+        defaults.set(item.versionString, forKey: AppUpdateDefaultsKey.postponedVersion)
         logHandler(.info, "App update \(item.displayVersionString) will install the next time Syncthing Tray quits.")
         // Return false so Sparkle keeps installing on quit without us taking over
         // immediateInstallHandler. Scheduled UI for this version is suppressed separately.
@@ -112,19 +124,27 @@ final class AppUpdateController: NSObject, SPUUpdaterDelegate, SPUStandardUserDr
     func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
         logHandler(.info, "A newer Syncthing Tray \(item.displayVersionString) is available.")
     }
+}
 
-    // MARK: - SPUStandardUserDriverDelegate
+/// Accessory-app activation and postpone-once reminders.
+///
+/// Sparkle invokes these callbacks on the main thread; the type itself stays
+/// nonisolated so it can satisfy `SPUStandardUserDriverDelegate`.
+private final class AppUpdateUserDriverDelegate: NSObject, SPUStandardUserDriverDelegate {
+    private let defaults: UserDefaults
 
-    @objc var supportsGentleScheduledUpdateReminders: Bool { true }
+    init(defaults: UserDefaults) {
+        self.defaults = defaults
+        super.init()
+    }
+
+    var supportsGentleScheduledUpdateReminders: Bool { true }
 
     func standardUserDriverShouldHandleShowingScheduledUpdate(
         _ update: SUAppcastItem,
         andInImmediateFocus immediateFocus: Bool
     ) -> Bool {
-        if postponedVersion == update.versionString {
-            return false
-        }
-        return true
+        defaults.string(forKey: AppUpdateDefaultsKey.postponedVersion) != update.versionString
     }
 
     func standardUserDriverWillHandleShowingUpdate(
@@ -133,20 +153,22 @@ final class AppUpdateController: NSObject, SPUUpdaterDelegate, SPUStandardUserDr
         state: SPUUserUpdateState
     ) {
         guard handleShowingUpdate else { return }
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate()
+        MainActor.assumeIsolated {
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate()
+        }
     }
 
     func standardUserDriverDidReceiveUserAttention(forUpdate update: SUAppcastItem) {
-        NSApp.dockTile.badgeLabel = nil
+        MainActor.assumeIsolated {
+            NSApp.dockTile.badgeLabel = nil
+        }
     }
 
     func standardUserDriverWillFinishUpdateSession() {
-        NSApp.setActivationPolicy(.accessory)
-        NSApp.dockTile.badgeLabel = nil
-    }
-
-    private var postponedVersion: String? {
-        defaults.string(forKey: DefaultsKey.postponedVersion)
+        MainActor.assumeIsolated {
+            NSApp.setActivationPolicy(.accessory)
+            NSApp.dockTile.badgeLabel = nil
+        }
     }
 }

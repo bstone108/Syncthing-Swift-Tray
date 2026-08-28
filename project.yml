@@ -43,7 +43,7 @@ targets:
         LSUIElement: true
         NSPrincipalClass: NSApplication
         SUFeedURL: https://github.com/bstone108/Syncthing-Swift-Tray/releases/download/appcast/appcast.xml
-        SUPublicEDKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        SUPublicEDKey: "QHiOcnw56iErvFKk231vGIdpsduIG/Rj/ygx+3Cn87E="
         SUEnableAutomaticChecks: true
         SUScheduledCheckInterval: 172800
         SUAutomaticallyUpdate: true

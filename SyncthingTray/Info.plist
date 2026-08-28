@@ -27,7 +27,7 @@
 	<key>SUFeedURL</key>
 	<string>https://github.com/bstone108/Syncthing-Swift-Tray/releases/download/appcast/appcast.xml</string>
 	<key>SUPublicEDKey</key>
-	<string>AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=</string>
+	<string>QHiOcnw56iErvFKk231vGIdpsduIG/Rj/ygx+3Cn87E=</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>SUScheduledCheckInterval</key>

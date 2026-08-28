@@ -538,7 +538,7 @@ stamp_sparkle_public_key_on_app() {
   fi
 
   if [[ -z "${public_key}" ]]; then
-    echo "SPARKLE_ED_PUBLIC_KEY unset; leaving template SUPublicEDKey in ${plist}"
+    echo "SPARKLE_ED_PUBLIC_KEY unset; leaving committed SUPublicEDKey in ${plist}"
     /usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "${plist}" || true
     return
   fi

@@ -33,15 +33,9 @@ The tray wrapper updates itself with [Sparkle 2](https://sparkle-project.org). T
 - After the matching archive is staged, Sparkle offers **Install and Relaunch** or **Later**. Later installs on the next quit and does not nag that same version again.
 - The popover **Check for Updates…** button runs a manual check.
 
-Publish-only EdDSA signing uses the Actions secret `SPARKLE_ED_PRIVATE_KEY` (Sparkle `generate_keys` base64 seed). The matching public key is stamped into the notarized app as `SUPublicEDKey`. The value in git is a template placeholder and is not a real key.
+Publish-only EdDSA signing uses the Actions secret `SPARKLE_ED_PRIVATE_KEY` (Sparkle `generate_keys` 32-byte seed, base64). `SUPublicEDKey` is committed in `Info.plist`. Do not generate a new keypair; the existing secret must stay in place so appcast signatures match installed apps.
 
-**Before the first Sparkle-enabled publish**, the coordinator must:
-
-1. Run Sparkle’s `generate_keys` (from a Sparkle 2.9+ release).
-2. Store the private seed in the repo secret `SPARKLE_ED_PRIVATE_KEY`. Never commit it.
-3. Cut the live notary test (`2026.8.28.N` or the next date.build) only after that secret is set, so the stamped public key matches the signed appcast.
-
-If the secret is missing, packaging still notarizes, but appcast generation is skipped and installed apps cannot verify updates.
+If `SPARKLE_ED_PRIVATE_KEY` is missing on a publish run, packaging still notarizes, but appcast generation is skipped and installed apps cannot verify updates.
 
 Pull requests compile unsigned Release on **both** runners (`CODE_SIGNING_ALLOWED=NO`) and fail if either dedicated slice is missing. The `macos-15` job also compiles universal and fails if either arch is missing. PRs do not sign, notarize, or consume a date.build number.
 

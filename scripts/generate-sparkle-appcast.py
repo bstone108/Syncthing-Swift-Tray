@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
 """Sign dedicated-arch Sparkle 2 update zips and write an appcast.
 
-Publish-only helper. The private Ed25519 seed comes from SPARKLE_ED_PRIVATE_KEY
-(GitHub Actions secret). Never commit that key.
+Publish-only helper. The private Ed25519 seed is Sparkle's generate_keys -x
+format (32-byte seed, base64). Pass it with -f/--ed-key-file (mode 600 temp
+file). Never commit or print that key.
 
 The generated feed lists dedicated arm64 and x86_64 zip enclosures for the same
 version. Apple Silicon items carry sparkle:hardwareRequirements=arm64 so Intel
 Macs skip them; the client also filters by macos-arm64 / macos-x86_64 filename.
 Universal archives are ignored.
-
-The private key is Sparkle's generate_keys base64 seed (32 bytes) or a PKCS#8
-Ed25519 PEM. The public key (SUPublicEDKey) is derived from the same seed.
 """
 
 from __future__ import annotations
@@ -117,7 +115,12 @@ def parse_private_seed(text: str) -> bytes:
     )
 
 
-def load_private_seed_from_env() -> bytes:
+def load_private_seed(*, key_file: str | None = None) -> bytes:
+    if key_file:
+        path = Path(key_file)
+        if not path.is_file():
+            raise SparkleKeyError(f"EdDSA key file not found: {path}")
+        return parse_private_seed(path.read_text(encoding="utf-8"))
     return parse_private_seed(os.environ.get("SPARKLE_ED_PRIVATE_KEY", ""))
 
 
@@ -313,6 +316,11 @@ def self_test() -> None:
         assert "sparkle:edSignature=" in xml
         assert f"releases/download/v{version}/SyncthingTray-{version}-macos-arm64.zip" in xml
 
+        key_file = root / "eddsa_priv"
+        key_file.write_text(base64.b64encode(seed).decode("ascii") + "\n", encoding="utf-8")
+        key_file.chmod(0o600)
+        assert load_private_seed(key_file=str(key_file)) == seed
+
         try:
             collect_dedicated_archives([files["universal"]], version)
         except SystemExit:
@@ -327,9 +335,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument(
+        "-f",
+        "--ed-key-file",
+        help="Sparkle generate_keys -x private seed file (preferred on publish).",
+    )
+    parser.add_argument(
         "--print-public-key",
         action="store_true",
-        help="Print SUPublicEDKey derived from SPARKLE_ED_PRIVATE_KEY.",
+        help="Print SUPublicEDKey derived from -f or SPARKLE_ED_PRIVATE_KEY.",
     )
     parser.add_argument("--version", help="date.build version (YYYY.M.D.N)")
     parser.add_argument(
@@ -355,7 +368,7 @@ def main() -> int:
         return 0
 
     try:
-        seed = load_private_seed_from_env()
+        seed = load_private_seed(key_file=args.ed_key_file)
         if args.print_public_key:
             print(public_key_b64(seed))
             return 0

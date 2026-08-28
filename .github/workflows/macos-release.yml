@@ -25,7 +25,6 @@ jobs:
       package: ${{ steps.decide.outputs.package }}
       release: ${{ steps.decide.outputs.release }}
       app_version: ${{ steps.version.outputs.app_version }}
-      sparkle_public_key: ${{ steps.sparkle.outputs.public_key }}
     steps:
       - name: Classify pull request vs real release
         id: decide
@@ -94,27 +93,6 @@ jobs:
           fi
           echo "app_version=${version}" >> "${GITHUB_OUTPUT}"
           echo "Both Mac jobs will stamp ${version}"
-
-      - name: Derive Sparkle public key
-        id: sparkle
-        if: steps.decide.outputs.package == '1'
-        env:
-          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
-        run: |
-          set -euo pipefail
-          python3 -m pip install --user --break-system-packages pynacl
-          if [[ -z "${SPARKLE_ED_PRIVATE_KEY}" ]]; then
-            echo "SPARKLE_ED_PRIVATE_KEY is not set; leaving committed SUPublicEDKey and skipping appcast signing."
-            echo "public_key=" >> "${GITHUB_OUTPUT}"
-            exit 0
-          fi
-          pub="$(python3 scripts/generate-sparkle-appcast.py --print-public-key)"
-          if [[ -z "${pub}" ]]; then
-            echo "Failed to derive Sparkle public key from SPARKLE_ED_PRIVATE_KEY." >&2
-            exit 1
-          fi
-          echo "public_key=${pub}" >> "${GITHUB_OUTPUT}"
-          echo "Derived SUPublicEDKey (${#pub} chars) for Info.plist stamping"
 
   compile-macos:
     name: Compile Release (${{ matrix.arch }})
@@ -206,7 +184,6 @@ jobs:
           SYNCTHINGTRAY_VERSION: ${{ needs.gate.outputs.app_version }}
           SYNCTHINGTRAY_ARCH: ${{ matrix.arch }}
           SYNCTHINGTRAY_VERSION_DEBUG: "1"
-          SPARKLE_ED_PUBLIC_KEY: ${{ needs.gate.outputs.sparkle_public_key }}
         run: ./scripts/package-macos.sh
 
       - name: Upload ${{ matrix.arch }} artifacts
@@ -233,7 +210,6 @@ jobs:
           SYNCTHINGTRAY_VERSION: ${{ needs.gate.outputs.app_version }}
           SYNCTHINGTRAY_ARCH: universal
           SYNCTHINGTRAY_VERSION_DEBUG: "1"
-          SPARKLE_ED_PUBLIC_KEY: ${{ needs.gate.outputs.sparkle_public_key }}
         run: ./scripts/package-macos.sh
 
       - name: Upload universal artifacts
@@ -339,16 +315,26 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -z "${SPARKLE_ED_PRIVATE_KEY}" ]]; then
-            echo "::warning::SPARKLE_ED_PRIVATE_KEY is not set; skipping Sparkle appcast. Set this Actions secret to the generate_keys Ed25519 seed before the first Sparkle-enabled publish."
+            echo "::warning::SPARKLE_ED_PRIVATE_KEY is not set; skipping Sparkle appcast."
             exit 0
           fi
           python3 -m pip install --user --break-system-packages pynacl
+          keyfile="$(mktemp)"
+          cleanup_key() { rm -f "${keyfile}"; }
+          trap cleanup_key EXIT
+          umask 077
+          printf '%s\n' "${SPARKLE_ED_PRIVATE_KEY}" > "${keyfile}"
+          chmod 600 "${keyfile}"
+          unset SPARKLE_ED_PRIVATE_KEY
           python3 scripts/generate-sparkle-appcast.py \
+            -f "${keyfile}" \
             --version "${APP_VERSION}" \
             --repo "${GH_REPO}" \
             --output release-assets/appcast.xml \
             "release-assets/SyncthingTray-${APP_VERSION}-macos-arm64.zip" \
             "release-assets/SyncthingTray-${APP_VERSION}-macos-x86_64.zip"
+          rm -f "${keyfile}"
+          trap - EXIT
           tag="v${APP_VERSION}"
           gh release upload "${tag}" release-assets/appcast.xml --repo "${GH_REPO}" --clobber
           if gh release view appcast --repo "${GH_REPO}" >/dev/null 2>&1; then

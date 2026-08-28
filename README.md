@@ -33,7 +33,7 @@ The tray wrapper updates itself with [Sparkle 2](https://sparkle-project.org). T
 - After the matching archive is staged, Sparkle offers **Install and Relaunch** or **Later**. Later installs on the next quit and does not nag that same version again.
 - The popover **Check for Updates…** button runs a manual check.
 
-Publish-only EdDSA signing uses the Actions secret `SPARKLE_ED_PRIVATE_KEY` (Sparkle `generate_keys` 32-byte seed, base64). `SUPublicEDKey` is committed in `Info.plist`. Do not generate a new keypair; the existing secret must stay in place so appcast signatures match installed apps.
+Publish-only EdDSA signing writes `SPARKLE_ED_PRIVATE_KEY` to a mode-600 temp file, passes `-f` to the appcast generator (Sparkle `generate_keys -x` 32-byte seed), then deletes the file. `SUPublicEDKey` is committed in `Info.plist`. Do not generate a new keypair.
 
 If `SPARKLE_ED_PRIVATE_KEY` is missing on a publish run, packaging still notarizes, but appcast generation is skipped and installed apps cannot verify updates.
 

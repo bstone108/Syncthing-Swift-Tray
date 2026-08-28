@@ -48,6 +48,9 @@ set -euo pipefail
 #   MACOS_NOTARY_TIMEOUT          notarytool --timeout (default 45m)
 #   SYNCTHINGTRAY_CI_VERSION_LABEL artifact label for non-release runs (ci)
 #   SYNCTHINGTRAY_ARCH            arm64, x86_64, or universal (default: universal)
+#   SPARKLE_ED_PUBLIC_KEY         stamp SUPublicEDKey before codesign (publish).
+#                                 Derived from SPARKLE_ED_PRIVATE_KEY in the gate job.
+#                                 Never pass the private key into this script.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -271,12 +274,22 @@ PY
 
 item_wants_entitlements() {
   local item="$1"
-  if [[ -d "${item}" && "${item}" == *.app ]]; then
-    return 0
-  fi
-  # Entitlements apply to processes, not libraries.
-  if [[ "${item}" == *.dylib || "${item}" == *.so || "${item}" == *.framework/* ]]; then
+  local base
+  base="$(basename "${item}")"
+
+  # Sparkle helpers must keep their own signing metadata, not the tray
+  # entitlements (Updater.app, Autoupdate, XPC services).
+  if [[ "${item}" == *".framework/"* || "${item}" == *.xpc || "${item}" == *.xpc/* ]]; then
     return 1
+  fi
+  if [[ "${item}" == *.dylib || "${item}" == *.so ]]; then
+    return 1
+  fi
+  if [[ -d "${item}" && "${item}" == *.app && "${base}" != "${APP_BUNDLE_NAME}.app" ]]; then
+    return 1
+  fi
+  if [[ -d "${item}" && "${base}" == "${APP_BUNDLE_NAME}.app" ]]; then
+    return 0
   fi
   return 0
 }
@@ -289,7 +302,10 @@ sign_item() {
     --timestamp
     --sign "${CODESIGN_IDENTITY}"
   )
-  if item_wants_entitlements "${item}" && [[ -f "${ENTITLEMENTS_FILE}" ]]; then
+  if [[ "${item}" == *.xpc || "${item}" == *.xpc/* ]]; then
+    # Downloader.xpc ships with its own entitlements; do not replace them.
+    args+=(--preserve-metadata=entitlements,flags,runtime)
+  elif item_wants_entitlements "${item}" && [[ -f "${ENTITLEMENTS_FILE}" ]]; then
     args+=(--entitlements "${ENTITLEMENTS_FILE}" --generate-entitlement-der)
   fi
   echo "Signing (Developer ID) ${item}"
@@ -337,6 +353,19 @@ sign_app_bundle() {
     [[ -z "${macho_path}" ]] && continue
     sign_item "${macho_path}"
   done < <(list_macho_files "${app_bundle}")
+
+  while IFS= read -r xpc; do
+    [[ -d "${xpc}" ]] || continue
+    sign_item "${xpc}"
+  done < <(find "${app_bundle}" -name "*.xpc" -type d | awk '{ print gsub(/\//, "/") "\t" $0 }' | sort -nr | cut -f2-)
+
+  while IFS= read -r nested_app; do
+    [[ -d "${nested_app}" ]] || continue
+    if [[ "$(basename "${nested_app}")" == "${APP_BUNDLE_NAME}.app" ]]; then
+      continue
+    fi
+    sign_item "${nested_app}"
+  done < <(find "${app_bundle}" -name "*.app" -type d | awk '{ print gsub(/\//, "/") "\t" $0 }' | sort -nr | cut -f2-)
 
   while IFS= read -r framework; do
     [[ -d "${framework}" ]] || continue
@@ -498,6 +527,44 @@ stamp_release_versions_on_app() {
   echo "Stamped ${plist} CFBundleShortVersionString=${short_version} CFBundleVersion=${bundle_version}"
 }
 
+stamp_sparkle_public_key_on_app() {
+  local app_bundle="$1"
+  local plist="${app_bundle}/Contents/Info.plist"
+  local public_key="${SPARKLE_ED_PUBLIC_KEY:-}"
+
+  if [[ ! -f "${plist}" ]]; then
+    echo "Staged Info.plist not found: ${plist}" >&2
+    exit 1
+  fi
+
+  if [[ -z "${public_key}" ]]; then
+    echo "SPARKLE_ED_PUBLIC_KEY unset; leaving template SUPublicEDKey in ${plist}"
+    /usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "${plist}" || true
+    return
+  fi
+
+  /usr/libexec/PlistBuddy -c "Set :SUPublicEDKey ${public_key}" "${plist}"
+  local stamped
+  stamped="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "${plist}")"
+  if [[ "${stamped}" != "${public_key}" ]]; then
+    echo "Failed to stamp ${plist} SUPublicEDKey." >&2
+    exit 1
+  fi
+  echo "Stamped ${plist} SUPublicEDKey (${#public_key} chars)"
+}
+
+verify_sparkle_embedded() {
+  local app_bundle="$1"
+  local sparkle="${app_bundle}/Contents/Frameworks/Sparkle.framework"
+  if [[ ! -d "${sparkle}" ]]; then
+    echo "Sparkle.framework was not embedded in ${app_bundle}" >&2
+    echo "Frameworks present:" >&2
+    ls -la "${app_bundle}/Contents/Frameworks" >&2 || true
+    exit 1
+  fi
+  echo "Embedded Sparkle.framework at ${sparkle}"
+}
+
 rm_rf "${WORK_DIR}" "${DERIVED_DATA_PATH}" "${STAGING_BUILD_DIR}"
 mkdir -p "${WORK_DIR}" "${STAGING_BUILD_DIR}" "${DELIVERABLE_DIR}"
 
@@ -509,7 +576,6 @@ xcodebuild \
   -configuration Release \
   -destination "generic/platform=macOS" \
   -derivedDataPath "${DERIVED_DATA_PATH}" \
-  "CONFIGURATION_BUILD_DIR=${STAGING_BUILD_DIR}" \
   ARCHS="${XCODE_ARCHS}" \
   ONLY_ACTIVE_ARCH="${ONLY_ACTIVE_ARCH}" \
   EXCLUDED_ARCHS= \
@@ -517,9 +583,11 @@ xcodebuild \
   CODE_SIGNING_REQUIRED=NO \
   build
 
-SOURCE_APP="${STAGING_BUILD_DIR}/${APP_BUNDLE_NAME}.app"
+SOURCE_APP="${DERIVED_DATA_PATH}/Build/Products/Release/${APP_BUNDLE_NAME}.app"
 if [[ ! -d "${SOURCE_APP}" ]]; then
   echo "Built app bundle not found: ${SOURCE_APP}" >&2
+  echo "Build products:" >&2
+  find "${DERIVED_DATA_PATH}/Build/Products" -name "*.app" -maxdepth 3 >&2 || true
   exit 1
 fi
 
@@ -535,6 +603,7 @@ if [[ ! -f "${STAGED_APP}/Contents/MacOS/${APP_BUNDLE_NAME}" ]]; then
 fi
 
 verify_expected_architectures "${STAGED_APP}/Contents/MacOS/${APP_BUNDLE_NAME}"
+verify_sparkle_embedded "${STAGED_APP}"
 
 if [[ "${COMPILE_ONLY}" -eq 1 ]]; then
   echo "Compile-only: unsigned ${ARCH_LABEL} app staged at ${STAGED_APP}"
@@ -546,6 +615,7 @@ fi
 # Stamp before codesign so the sealed Info.plist matches the artifact/tag.
 # Never rewrite SyncthingTray/Info.plist in git.
 stamp_release_versions_on_app "${STAGED_APP}"
+stamp_sparkle_public_key_on_app "${STAGED_APP}"
 
 sign_app_bundle "${STAGED_APP}"
 

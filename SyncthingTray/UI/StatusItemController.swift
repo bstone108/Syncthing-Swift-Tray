@@ -26,7 +26,7 @@ final class StatusItemController: NSObject {
         popover.behavior = .transient
         popover.appearance = NSAppearance(named: .darkAqua)
         popover.contentViewController = NSHostingController(rootView: contentView)
-        popover.contentSize = NSSize(width: 390, height: 470)
+        popover.contentSize = NSSize(width: 390, height: 510)
         DebugLog.write("popover configured")
 
         if let button = statusItem.button {

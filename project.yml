@@ -2,6 +2,10 @@ name: SyncthingTray
 options:
   deploymentTarget:
     macOS: "14.0"
+packages:
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: "2.9.6"
 settings:
   base:
     PRODUCT_NAME: "Syncthing Tray"
@@ -26,6 +30,10 @@ targets:
       - path: SyncthingTray
         excludes:
           - "*.entitlements"
+    dependencies:
+      - package: Sparkle
+        product: Sparkle
+        embed: true
     info:
       path: SyncthingTray/Info.plist
       properties:
@@ -34,6 +42,12 @@ targets:
         CFBundleVersion: "2"
         LSUIElement: true
         NSPrincipalClass: NSApplication
+        SUFeedURL: https://github.com/bstone108/Syncthing-Swift-Tray/releases/download/appcast/appcast.xml
+        SUPublicEDKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        SUEnableAutomaticChecks: true
+        SUScheduledCheckInterval: 172800
+        SUAutomaticallyUpdate: true
+        SUShowReleaseNotes: false
     settings:
       base:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

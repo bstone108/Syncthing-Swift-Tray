@@ -28,7 +28,7 @@ struct PopoverContentView: View {
                     Text(appModel.statusSnapshot.summaryText)
                         .font(.headline)
 
-                    Text("Runtime \(appModel.currentRuntimeVersion) • minimum \(appModel.minimumRuntimeVersion)")
+                    Text("App \(appModel.appVersionString) • runtime \(appModel.currentRuntimeVersion) • minimum \(appModel.minimumRuntimeVersion)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -80,6 +80,12 @@ struct PopoverContentView: View {
                         get: { appModel.preferences.autoCheckUpdates },
                         set: { appModel.setAutoCheckUpdates($0) }
                     ))
+
+                    Button("Check for Updates…") {
+                        appModel.requestCheckForAppUpdates()
+                    }
+                    .disabled(appModel.canCheckForAppUpdates == false)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .toggleStyle(.switch)
 
@@ -118,7 +124,7 @@ struct PopoverContentView: View {
             .padding(16)
         }
         .padding(8)
-        .frame(width: 390, height: 470)
+        .frame(width: 390, height: 510)
         .preferredColorScheme(.dark)
     }
 

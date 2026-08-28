@@ -24,5 +24,17 @@
 	<true/>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>SUFeedURL</key>
+	<string>https://github.com/bstone108/Syncthing-Swift-Tray/releases/download/appcast/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUScheduledCheckInterval</key>
+	<integer>172800</integer>
+	<key>SUAutomaticallyUpdate</key>
+	<true/>
+	<key>SUShowReleaseNotes</key>
+	<false/>
 </dict>
 </plist>

@@ -15,6 +15,10 @@
 		30F19A374BCCFFF5A19133EB /* CommandRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = E60C15BB768E3A8D5D87BC02 /* CommandRunner.swift */; };
 		39E910851F4E405ACA69E4FC /* PreferencesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E66471641A238F0EFE7DF5B8 /* PreferencesStore.swift */; };
 		3BD4D41FDC5617F78868B151 /* ConfigManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80B1B125EA75BC6497D884E4 /* ConfigManager.swift */; };
+		91A0B1C2D3E4F50607080902 /* AppUpdateArchitecture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91A0B1C2D3E4F50607080901 /* AppUpdateArchitecture.swift */; };
+		91A0B1C2D3E4F50607080904 /* AppUpdateController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91A0B1C2D3E4F50607080903 /* AppUpdateController.swift */; };
+		91A0B1C2D3E4F50607080906 /* AppUpdateArchitectureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91A0B1C2D3E4F50607080905 /* AppUpdateArchitectureTests.swift */; };
+		91A0B1C2D3E4F50607080909 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 91A0B1C2D3E4F50607080908 /* Sparkle */; };
 		44421F39C8AE4DD28A1CDFC7 /* StatusSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A5D470F7A741CC4AF66A64A /* StatusSnapshotTests.swift */; };
 		4BF542298D49E36AF843B478 /* RuntimeStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DA23EF9D8071E4D59E367B1 /* RuntimeStateStore.swift */; };
 		4C2013E076AB5A1C963DA468 /* AppPaths.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2FF60E511595C83EEB36917 /* AppPaths.swift */; };
@@ -84,6 +88,9 @@
 		8A5D470F7A741CC4AF66A64A /* StatusSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusSnapshotTests.swift; sourceTree = "<group>"; };
 		8AC30799467C29589291B299 /* UpdateCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateCoordinator.swift; sourceTree = "<group>"; };
 		8DA23EF9D8071E4D59E367B1 /* RuntimeStateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeStateStore.swift; sourceTree = "<group>"; };
+		91A0B1C2D3E4F50607080901 /* AppUpdateArchitecture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdateArchitecture.swift; sourceTree = "<group>"; };
+		91A0B1C2D3E4F50607080903 /* AppUpdateController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdateController.swift; sourceTree = "<group>"; };
+		91A0B1C2D3E4F50607080905 /* AppUpdateArchitectureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdateArchitectureTests.swift; sourceTree = "<group>"; };
 		902E3C382FEC09AF689BFE24 /* BinaryManagerPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BinaryManagerPolicyTests.swift; sourceTree = "<group>"; };
 		9609D497A3D87B3196460A22 /* RuntimeState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeState.swift; sourceTree = "<group>"; };
 		96120252AD4D5DB73D2632DD /* Versioning.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Versioning.swift; sourceTree = "<group>"; };
@@ -106,6 +113,7 @@
 			isa = PBXGroup;
 			children = (
 				6720AFAC5B4F386D4BD0131C /* AttentionLogStore.swift */,
+				91A0B1C2D3E4F50607080903 /* AppUpdateController.swift */,
 				052DCFA6C15A6BE3C8149603 /* BinaryCatalog.swift */,
 				331B7C12C5219A6DCFC62B25 /* BinaryManager.swift */,
 				80B1B125EA75BC6497D884E4 /* ConfigManager.swift */,
@@ -152,6 +160,7 @@
 			isa = PBXGroup;
 			children = (
 				B2FF60E511595C83EEB36917 /* AppPaths.swift */,
+				91A0B1C2D3E4F50607080901 /* AppUpdateArchitecture.swift */,
 				086064E854B7CAF0931A3EFD /* BundleInfo.swift */,
 				E60C15BB768E3A8D5D87BC02 /* CommandRunner.swift */,
 				7D5A004C78EDC6B050E5B834 /* DebugLog.swift */,
@@ -209,6 +218,7 @@
 			isa = PBXGroup;
 			children = (
 				84DE41D81825644DA60C4C19 /* AttentionLogStoreTests.swift */,
+				91A0B1C2D3E4F50607080905 /* AppUpdateArchitectureTests.swift */,
 				B089E44B2AC4B4CE8301EB93 /* BinaryCatalogTests.swift */,
 				902E3C382FEC09AF689BFE24 /* BinaryManagerPolicyTests.swift */,
 				187C9DC36D90B97CCDE2AAFF /* CommandRunnerTests.swift */,
@@ -229,6 +239,7 @@
 			buildConfigurationList = 3FEB2402C6EACCC29E9BE5EC /* Build configuration list for PBXNativeTarget "SyncthingTray" */;
 			buildPhases = (
 				74DE1EBBC7E2A4608B0C1E5C /* Sources */,
+				91A0B1C2D3E4F5060708090A /* Frameworks */,
 				BA42316593BA41DA413F847F /* Resources */,
 			);
 			buildRules = (
@@ -237,6 +248,7 @@
 			);
 			name = SyncthingTray;
 			packageProductDependencies = (
+				91A0B1C2D3E4F50607080908 /* Sparkle */,
 			);
 			productName = SyncthingTray;
 			productReference = C67781EAB1F1ABD677143CEA /* SyncthingTray.app */;
@@ -287,6 +299,9 @@
 			productRefGroup = 2A5EEAD359B860255660F366 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
+			packageReferences = (
+				91A0B1C2D3E4F50607080907 /* XCRemoteSwiftPackageReference "Sparkle" */,
+			);
 			targets = (
 				B2052BA817A8D7F176E92F1E /* SyncthingTray */,
 				C24D34E4D58E7BA3CE3896AB /* SyncthingTrayTests */,
@@ -305,12 +320,24 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXFrameworksBuildPhase section */
+		91A0B1C2D3E4F5060708090A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				91A0B1C2D3E4F50607080909 /* Sparkle in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		63A1ABC72E6021CDCBDEFB13 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 				ED3196D571479DF15448D4DD /* AttentionLogStoreTests.swift in Sources */,
+				91A0B1C2D3E4F50607080906 /* AppUpdateArchitectureTests.swift in Sources */,
 				F62A75A05D896CF4F32A1309 /* BinaryCatalogTests.swift in Sources */,
 				BE60DECDF9BBE00D0301C43B /* BinaryManagerPolicyTests.swift in Sources */,
 				9F722BE3B4C1DA21AAE6EA15 /* CommandRunnerTests.swift in Sources */,
@@ -329,6 +356,8 @@
 				F78B048E6A4A4FDA12873259 /* AppDelegate.swift in Sources */,
 				097C0520A18DDFF7822F185B /* AppModel.swift in Sources */,
 				4C2013E076AB5A1C963DA468 /* AppPaths.swift in Sources */,
+				91A0B1C2D3E4F50607080902 /* AppUpdateArchitecture.swift in Sources */,
+				91A0B1C2D3E4F50607080904 /* AppUpdateController.swift in Sources */,
 				C5D4D83AE30B56DFE2AC1160 /* AttentionLogEntry.swift in Sources */,
 				1C95E86E04A899C3F1128737 /* AttentionLogStore.swift in Sources */,
 				69F157C66E982098B4DB2BB0 /* BinaryCatalog.swift in Sources */,
@@ -610,6 +639,25 @@
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		91A0B1C2D3E4F50607080907 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.9.6;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		91A0B1C2D3E4F50607080908 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 91A0B1C2D3E4F50607080907 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = CAA54F180362289DF4BC6E58 /* Project object */;
 }

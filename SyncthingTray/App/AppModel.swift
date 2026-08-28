@@ -10,6 +10,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var stagedRuntimeVersion: String?
     @Published private(set) var updateBannerMessage: String?
     @Published private(set) var guiURLText = "http://127.0.0.1:8384"
+    @Published private(set) var canCheckForAppUpdates = false
+
+    var appVersionString: String { Bundle.main.appVersionString }
 
     let attentionLogStore: AttentionLogStore
     let preferences: PreferencesStore
@@ -24,6 +27,12 @@ final class AppModel: ObservableObject {
     private let networkMonitor: NetworkMonitor
     private let syncthingClient: SyncthingClient
     private let embeddedGUIController: EmbeddedGUIController
+
+    private lazy var appUpdateController: AppUpdateController = {
+        AppUpdateController { [weak self] level, message in
+            self?.attentionLogStore.addRunner(level: level, message: message)
+        }
+    }()
 
     private lazy var updateCoordinator: UpdateCoordinator = {
         let coordinator = UpdateCoordinator(
@@ -102,6 +111,7 @@ final class AppModel: ObservableObject {
         DebugLog.write("StatusItemController created")
         statusItemController?.install()
         DebugLog.write("StatusItemController install returned")
+        startAppUpdater()
         networkMonitor.start()
         DebugLog.write("Network monitor started")
         synchronizeLaunchAtLoginPreference()
@@ -119,6 +129,7 @@ final class AppModel: ObservableObject {
         statusRefreshTask?.cancel()
         eventTask?.cancel()
         updateCoordinator.stop()
+        appUpdateController.onCanCheckForUpdatesChange = nil
         networkMonitor.stop()
         launchAgentController.stopSynchronously()
         embeddedGUIController.close()
@@ -164,6 +175,10 @@ final class AppModel: ObservableObject {
         NSApp.terminate(nil)
     }
 
+    func requestCheckForAppUpdates() {
+        appUpdateController.checkForUpdates()
+    }
+
     func setLaunchAtLoginEnabled(_ enabled: Bool) {
         let previousValue = preferences.launchAtLoginEnabled
         preferences.launchAtLoginEnabled = enabled
@@ -202,6 +217,14 @@ final class AppModel: ObservableObject {
                 await self?.updateCoordinator.performCheckIfDue(force: true)
             }
         }
+    }
+
+    private func startAppUpdater() {
+        appUpdateController.onCanCheckForUpdatesChange = { [weak self] canCheck in
+            self?.canCheckForAppUpdates = canCheck
+        }
+        appUpdateController.start()
+        DebugLog.write("App updater started")
     }
 
     private func bootstrap() async {

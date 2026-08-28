@@ -24,6 +24,7 @@ jobs:
       compile: ${{ steps.decide.outputs.compile }}
       package: ${{ steps.decide.outputs.package }}
       release: ${{ steps.decide.outputs.release }}
+      app_version: ${{ steps.version.outputs.app_version }}
     steps:
       - name: Classify pull request vs real release
         id: decide
@@ -67,11 +68,47 @@ jobs:
           echo "package=0" >> "${GITHUB_OUTPUT}"
           echo "release=0" >> "${GITHUB_OUTPUT}"
 
+      - name: Check out repository
+        if: steps.decide.outputs.package == '1'
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Assign shared date.build version
+        id: version
+        if: steps.decide.outputs.package == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          python3 scripts/next-date-build-version.py --self-test
+          if [[ "${EVENT_NAME}" == "push" && "${GITHUB_REF}" == refs/tags/v* ]]; then
+            version="$(python3 scripts/next-date-build-version.py --from-tag "${REF_NAME}")"
+          else
+            version="$(python3 scripts/next-date-build-version.py)"
+          fi
+          echo "app_version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "Both Mac jobs will stamp ${version}"
+
   compile-macos:
-    name: Compile Release
+    name: Compile Release (${{ matrix.arch }})
     needs: gate
     if: needs.gate.outputs.compile == '1'
-    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+            extra_arch: "universal"
+          - runner: macos-15-intel
+            arch: x86_64
+            extra_arch: "none"
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
@@ -82,44 +119,32 @@ jobs:
       - name: Install xcodegen
         run: brew install xcodegen
 
-      - name: Generate Xcode project
-        run: xcodegen generate --spec project.yml
+      - name: Compile unsigned ${{ matrix.arch }} Release
+        env:
+          SYNCTHINGTRAY_ARCH: ${{ matrix.arch }}
+        run: ./scripts/package-macos.sh --compile-only
 
-      - name: Compile universal Release without signing
-        run: |
-          set -euo pipefail
-          derived="${RUNNER_TEMP}/SyncthingTrayCompileDerivedData"
-          xcodebuild \
-            -project SyncthingTray.xcodeproj \
-            -scheme SyncthingTray \
-            -configuration Release \
-            -destination "generic/platform=macOS" \
-            -derivedDataPath "${derived}" \
-            ARCHS="arm64 x86_64" \
-            ONLY_ACTIVE_ARCH=NO \
-            EXCLUDED_ARCHS= \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            build
-          app="${derived}/Build/Products/Release/Syncthing Tray.app"
-          bin="${app}/Contents/MacOS/Syncthing Tray"
-          if [[ ! -x "${bin}" ]]; then
-            echo "Compiled executable not found: ${bin}" >&2
-            exit 1
-          fi
-          archs="$(lipo -archs "${bin}")"
-          echo "Compiled architectures: ${archs}"
-          grep -qw arm64 <<<"${archs}"
-          grep -qw x86_64 <<<"${archs}"
+      - name: Compile unsigned universal Release
+        if: matrix.extra_arch == 'universal'
+        env:
+          SYNCTHINGTRAY_ARCH: universal
+        run: ./scripts/package-macos.sh --compile-only
 
   package-macos:
-    name: Sign, notarize, and staple
+    name: Sign, notarize, and staple (${{ matrix.arch }})
     needs: gate
     if: needs.gate.outputs.package == '1'
-    runs-on: macos-15
-    outputs:
-      app_version: ${{ steps.package.outputs.app_version }}
-      arch: ${{ steps.package.outputs.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+            extra_arch: "universal"
+          - runner: macos-15-intel
+            arch: x86_64
+            extra_arch: "none"
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
@@ -139,7 +164,7 @@ jobs:
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: ./scripts/import-apple-signing-cert.sh
 
-      - name: Build, sign, notarize, and staple
+      - name: Build, sign, notarize, and staple ${{ matrix.arch }}
         id: package
         env:
           MACOS_CODESIGN_IDENTITY: "Developer ID Application: BRANDON BROWNING STONE (K6N4J68LTY)"
@@ -150,19 +175,46 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           SYNCTHINGTRAY_RELEASE: ${{ needs.gate.outputs.release }}
-          SYNCTHINGTRAY_VERSION: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
+          SYNCTHINGTRAY_VERSION: ${{ needs.gate.outputs.app_version }}
+          SYNCTHINGTRAY_ARCH: ${{ matrix.arch }}
           SYNCTHINGTRAY_VERSION_DEBUG: "1"
         run: ./scripts/package-macos.sh
 
-      - name: Upload macOS artifacts
+      - name: Upload ${{ matrix.arch }} artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: SyncthingTray-${{ steps.package.outputs.app_version }}-macos-${{ steps.package.outputs.arch }}
+          name: SyncthingTray-${{ needs.gate.outputs.app_version }}-macos-${{ matrix.arch }}
           path: |
-            build/Syncthing Tray.app
-            build/SyncthingTray-${{ steps.package.outputs.app_version }}-macos-${{ steps.package.outputs.arch }}.zip
-            build/SyncthingTray-${{ steps.package.outputs.app_version }}-macos-${{ steps.package.outputs.arch }}.dmg
-            build/SHA256SUMS
+            build/SyncthingTray-${{ needs.gate.outputs.app_version }}-macos-${{ matrix.arch }}.zip
+            build/SyncthingTray-${{ needs.gate.outputs.app_version }}-macos-${{ matrix.arch }}.dmg
+            build/SHA256SUMS-macos-${{ matrix.arch }}
+          if-no-files-found: error
+
+      - name: Build, sign, notarize, and staple universal
+        if: matrix.extra_arch == 'universal'
+        env:
+          MACOS_CODESIGN_IDENTITY: "Developer ID Application: BRANDON BROWNING STONE (K6N4J68LTY)"
+          MACOS_REQUIRE_NOTARIZATION: "1"
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SYNCTHINGTRAY_RELEASE: ${{ needs.gate.outputs.release }}
+          SYNCTHINGTRAY_VERSION: ${{ needs.gate.outputs.app_version }}
+          SYNCTHINGTRAY_ARCH: universal
+          SYNCTHINGTRAY_VERSION_DEBUG: "1"
+        run: ./scripts/package-macos.sh
+
+      - name: Upload universal artifacts
+        if: matrix.extra_arch == 'universal'
+        uses: actions/upload-artifact@v6
+        with:
+          name: SyncthingTray-${{ needs.gate.outputs.app_version }}-macos-universal
+          path: |
+            build/SyncthingTray-${{ needs.gate.outputs.app_version }}-macos-universal.zip
+            build/SyncthingTray-${{ needs.gate.outputs.app_version }}-macos-universal.dmg
+            build/SHA256SUMS-macos-universal
           if-no-files-found: error
 
       - name: Delete signing keychain
@@ -186,14 +238,15 @@ jobs:
       - name: Download macOS artifacts
         uses: actions/download-artifact@v5
         with:
-          name: SyncthingTray-${{ needs.package-macos.outputs.app_version }}-macos-${{ needs.package-macos.outputs.arch }}
-          path: release-artifacts/macos
+          pattern: SyncthingTray-${{ needs.gate.outputs.app_version }}-macos-*
+          path: release-artifacts
+          merge-multiple: false
 
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          APP_VERSION: ${{ needs.package-macos.outputs.app_version }}
+          APP_VERSION: ${{ needs.gate.outputs.app_version }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
@@ -201,10 +254,33 @@ jobs:
             echo "Refusing to publish non-release version ${APP_VERSION}" >&2
             exit 1
           fi
+          mkdir -p release-assets
+          while IFS= read -r -d '' asset; do
+            cp "${asset}" "release-assets/$(basename "${asset}")"
+          done < <(find release-artifacts -type f \( -name '*.zip' -o -name '*.dmg' \) -print0)
+          missing=0
+          for arch in arm64 x86_64 universal; do
+            for ext in zip dmg; do
+              expected="release-assets/SyncthingTray-${APP_VERSION}-macos-${arch}.${ext}"
+              if [[ ! -f "${expected}" ]]; then
+                echo "Missing required artifact: ${expected}" >&2
+                missing=1
+              fi
+            done
+          done
+          if [[ "${missing}" -ne 0 ]]; then
+            echo "Artifacts found:" >&2
+            find release-artifacts -type f >&2 || true
+            exit 1
+          fi
+          (
+            cd release-assets
+            sha256sum *.zip *.dmg | sort -k2 > SHA256SUMS
+          )
           tag="v${APP_VERSION}"
           title="Syncthing Tray ${APP_VERSION}"
-          notes="Developer ID-signed and notarized universal macOS build (Apple Silicon and Intel) for ${APP_VERSION}."
-          mapfile -d '' assets < <(find release-artifacts -type f \( -name '*.zip' -o -name '*.dmg' -o -name 'SHA256SUMS' \) -print0)
+          notes="Developer ID-signed and notarized macOS builds for ${APP_VERSION}: dedicated Apple Silicon (arm64), dedicated Intel (x86_64), and universal."
+          mapfile -d '' assets < <(find release-assets -type f -print0)
           if [[ "${#assets[@]}" -eq 0 ]]; then
             echo "No zip/dmg/SHA256SUMS artifacts found to publish." >&2
             exit 1

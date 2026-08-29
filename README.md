@@ -24,6 +24,19 @@ GitHub Actions publishes **dedicated** Apple Silicon and Intel builds, plus a un
 
 Each `.app` is Developer ID-signed, notarized via a temp zip (that zip is not a release asset), stapled, then shipped as the named zip. The `.dmg` is signed, notarized, and stapled separately. One GitHub Release attaches every zip+dmg plus `SHA256SUMS`.
 
+## In-app updates (Sparkle 2)
+
+The tray wrapper updates itself with [Sparkle 2](https://sparkle-project.org). That is separate from **Auto-check runtime updates**, which still only refreshes the bundled Syncthing *daemon* (`UpdateCoordinator`).
+
+- About every two days Sparkle fetches `https://github.com/bstone108/Syncthing-Swift-Tray/releases/download/appcast/appcast.xml`.
+- The feed lists dedicated `macos-arm64` and `macos-x86_64` zip enclosures. Universal extras are published but are not Sparkle targets.
+- After the matching archive is staged, Sparkle offers **Install and Relaunch** or **Later**. Later installs on the next quit and does not nag that same version again.
+- The popover **Check for Updates…** button runs a manual check.
+
+Publish-only EdDSA signing writes `SPARKLE_ED_PRIVATE_KEY` to a mode-600 temp file, passes `-f` to the appcast generator (Sparkle `generate_keys -x` 32-byte seed), then deletes the file. `SUPublicEDKey` is committed in `Info.plist`. Do not generate a new keypair.
+
+If `SPARKLE_ED_PRIVATE_KEY` is missing on a publish run, packaging still notarizes, but appcast generation is skipped and installed apps cannot verify updates.
+
 Pull requests compile unsigned Release on **both** runners (`CODE_SIGNING_ALLOWED=NO`) and fail if either dedicated slice is missing. The `macos-15` job also compiles universal and fails if either arch is missing. PRs do not sign, notarize, or consume a date.build number.
 
 After this workflow is merged, cut a GitHub Release with either:

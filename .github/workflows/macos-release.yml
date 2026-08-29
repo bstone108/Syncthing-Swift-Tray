@@ -114,7 +114,10 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Verify packaging helpers
-        run: python3 scripts/next-date-build-version.py --self-test
+        run: |
+          python3 scripts/next-date-build-version.py --self-test
+          python3 -m pip install --user --break-system-packages pynacl
+          python3 scripts/generate-sparkle-appcast.py --self-test
 
       - name: Install xcodegen
         run: brew install xcodegen
@@ -153,7 +156,10 @@ jobs:
           fetch-tags: true
 
       - name: Verify packaging helpers
-        run: python3 scripts/next-date-build-version.py --self-test
+        run: |
+          python3 scripts/next-date-build-version.py --self-test
+          python3 -m pip install --user --break-system-packages pynacl
+          python3 scripts/generate-sparkle-appcast.py --self-test
 
       - name: Install xcodegen
         run: brew install xcodegen
@@ -235,6 +241,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
       - name: Download macOS artifacts
         uses: actions/download-artifact@v5
         with:
@@ -296,3 +305,46 @@ jobs:
             fi
           fi
           gh release create "${tag}" --repo "${GH_REPO}" "${assets[@]}" --title "${title}" --notes "${notes}" --latest --target "${GITHUB_SHA}"
+
+      - name: Sign dedicated-arch zips and publish Sparkle appcast
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          APP_VERSION: ${{ needs.gate.outputs.app_version }}
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${SPARKLE_ED_PRIVATE_KEY}" ]]; then
+            echo "::warning::SPARKLE_ED_PRIVATE_KEY is not set; skipping Sparkle appcast."
+            exit 0
+          fi
+          python3 -m pip install --user --break-system-packages pynacl
+          keyfile="$(mktemp)"
+          cleanup_key() { rm -f "${keyfile}"; }
+          trap cleanup_key EXIT
+          umask 077
+          printf '%s\n' "${SPARKLE_ED_PRIVATE_KEY}" > "${keyfile}"
+          chmod 600 "${keyfile}"
+          unset SPARKLE_ED_PRIVATE_KEY
+          python3 scripts/generate-sparkle-appcast.py \
+            -f "${keyfile}" \
+            --version "${APP_VERSION}" \
+            --repo "${GH_REPO}" \
+            --output release-assets/appcast.xml \
+            "release-assets/SyncthingTray-${APP_VERSION}-macos-arm64.zip" \
+            "release-assets/SyncthingTray-${APP_VERSION}-macos-x86_64.zip"
+          rm -f "${keyfile}"
+          trap - EXIT
+          tag="v${APP_VERSION}"
+          gh release upload "${tag}" release-assets/appcast.xml --repo "${GH_REPO}" --clobber
+          if gh release view appcast --repo "${GH_REPO}" >/dev/null 2>&1; then
+            gh release upload appcast release-assets/appcast.xml --repo "${GH_REPO}" --clobber
+          else
+            gh release create appcast release-assets/appcast.xml \
+              --repo "${GH_REPO}" \
+              --title "Sparkle appcast" \
+              --notes "Durable Sparkle 2 appcast for Syncthing Tray. Updated on each real publish; this tag is not an app release." \
+              --latest=false \
+              --target "${GITHUB_SHA}"
+          fi
+          echo "Published Sparkle appcast with dedicated macos-arm64 and macos-x86_64 enclosures."

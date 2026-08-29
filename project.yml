@@ -31,22 +31,14 @@ targets:
         excludes:
           - "*.entitlements"
     dependencies:
-      # Link the SPM product. Do not embed it: XcodeGen would Copy
-      # BUILT_PRODUCTS_DIR/Sparkle (no .framework), which ProcessXCFramework
-      # never creates. The binary xcframework is processed into
-      # BUILT_PRODUCTS_DIR/Sparkle.framework and auto-copied into the app.
+      # Link only. XcodeGen embed:true copies BUILT_PRODUCTS_DIR/Sparkle (no
+      # .framework) and fails. Xcode already ProcessXCFrameworks Sparkle into
+      # BUILT_PRODUCTS_DIR/Sparkle.framework and auto-embeds that into
+      # Contents/Frameworks. A second Embed Frameworks copy of Sparkle.framework
+      # makes "Multiple commands produce".
       - package: Sparkle
         product: Sparkle
         embed: false
-      # Embed Frameworks copies Sparkle.framework (destination Frameworks),
-      # not the bare Sparkle product. Unsigned CI uses CODE_SIGNING_ALLOWED=NO;
-      # Developer ID signing of the nested framework happens later in
-      # package-macos.sh on publish only.
-      - framework: Sparkle.framework
-        implicit: true
-        embed: true
-        link: false
-        codeSign: false
     info:
       path: SyncthingTray/Info.plist
       properties:

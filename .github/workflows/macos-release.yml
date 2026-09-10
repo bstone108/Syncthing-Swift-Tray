@@ -154,7 +154,8 @@ jobs:
             -derivedDataPath "${RUNNER_TEMP}/SyncthingTrayTests-${SYNCTHINGTRAY_ARCH}" \
             ARCHS="${xcode_archs}" \
             ONLY_ACTIVE_ARCH="${only_active_arch}" \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES
 
       - name: Compile unsigned universal Release
         if: matrix.extra_arch == 'universal'

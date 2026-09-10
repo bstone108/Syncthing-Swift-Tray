@@ -71,7 +71,7 @@ final class UpdateCoordinator {
         if isOpen {
             delayedApplyTask?.cancel()
             if let stagedVersion = binaryManager.stagedVersion() {
-                updateBannerMessage = "Syncthing \(stagedVersion) is ready. Close the GUI to apply it."
+                updateBannerMessage = "Update ready — installs 5 minutes after GUI closes."
                 stateDidChange?()
             }
             return

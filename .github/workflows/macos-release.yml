@@ -127,6 +127,35 @@ jobs:
           SYNCTHINGTRAY_ARCH: ${{ matrix.arch }}
         run: ./scripts/package-macos.sh --compile-only
 
+      - name: Run native unit tests (${{ matrix.arch }})
+        env:
+          SYNCTHINGTRAY_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          case "${SYNCTHINGTRAY_ARCH}" in
+            arm64)
+              xcode_archs="arm64"
+              only_active_arch="YES"
+              ;;
+            x86_64)
+              xcode_archs="x86_64"
+              only_active_arch="YES"
+              ;;
+            *)
+              echo "Unexpected dedicated test architecture: ${SYNCTHINGTRAY_ARCH}" >&2
+              exit 1
+              ;;
+          esac
+          xcodebuild test \
+            -project SyncthingTray.xcodeproj \
+            -scheme SyncthingTray \
+            -configuration Release \
+            -destination 'platform=macOS' \
+            -derivedDataPath "${RUNNER_TEMP}/SyncthingTrayTests-${SYNCTHINGTRAY_ARCH}" \
+            ARCHS="${xcode_archs}" \
+            ONLY_ACTIVE_ARCH="${only_active_arch}" \
+            CODE_SIGNING_ALLOWED=NO
+
       - name: Compile unsigned universal Release
         if: matrix.extra_arch == 'universal'
         env:

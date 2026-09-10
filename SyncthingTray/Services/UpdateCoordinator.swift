@@ -10,6 +10,7 @@ final class UpdateCoordinator {
     private let logHandler: (AttentionLogLevel, String) -> Void
     private let applyHandler: () async -> Bool
     private let guiWindowOpenProvider: () -> Bool
+    private static let guiCloseApplyDelay: Duration = .seconds(1)
 
     private var hourlyTask: Task<Void, Never>?
     private var delayedApplyTask: Task<Void, Never>?
@@ -86,8 +87,12 @@ final class UpdateCoordinator {
         updateBannerMessage = nil
         stateDidChange?()
         delayedApplyTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(300))
-            guard let self, Task.isCancelled == false else { return }
+            try? await Task.sleep(for: Self.guiCloseApplyDelay)
+            guard let self,
+                  Task.isCancelled == false,
+                  self.guiWindowOpenProvider() == false else {
+                return
+            }
             _ = await self.applyStagedUpdate()
         }
     }
